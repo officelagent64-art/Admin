@@ -319,13 +319,10 @@
     <script>
         const SUPABASE_URL      = 'https://zpkddqkqyjrfogjcjpwz.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_7kQXBCZVBKvxqTyqdLC-HA_3TteXaTd';
-        const N8N_CERT_WEBHOOK         = 'https://n8n-z4y4.onrender.com/webhook-test/certificat-signe';
-        const N8N_IMPORT_NOTES_WEBHOOK = 'https://n8n-mcda.onrender.com/webhook-test/note';
+        const N8N_CERT_WEBHOOK  = 'https://n8n-z4y4.onrender.com/webhook-test/certificat-signe';
 
-        // ── BUCKET NAME MAP (corrected to match real Supabase bucket names) ──
-        // Supabase buckets: students, plannig (typo), notes, document
         const BUCKET = {
-            planning:     'plannig',   // ← typo in Supabase, kept as-is
+            planning:     'plannig',   // typo in Supabase kept as-is
             notes:        'notes',
             students:     'students',
             certificates: 'document'
@@ -334,10 +331,8 @@
         const { createClient } = supabase;
         const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // ── Lire student_id depuis l'URL IMMÉDIATEMENT (avant session check) ──
         const urlStudentId = new URLSearchParams(window.location.search).get('student_id');
 
-        // ── Afficher le student_id IMMÉDIATEMENT sans attendre la session ──
         (function showStudentIdNow() {
             const found   = document.getElementById('cert-id-found');
             const missing = document.getElementById('cert-id-missing');
@@ -349,15 +344,11 @@
             }
         })();
 
-        // ── SESSION CHECK ──
         (async () => {
             const overlay = document.getElementById('session-overlay');
             try {
                 const { data: { session } } = await sb.auth.getSession();
-                if (!session) {
-                    window.location.href = 'login.html';
-                    return;
-                }
+                if (!session) { window.location.href = 'login.html'; return; }
                 overlay.classList.add('hidden');
                 initApp();
             } catch (err) {
@@ -367,9 +358,7 @@
         })();
 
         sb.auth.onAuthStateChange((event, session) => {
-            if (event === 'SIGNED_OUT' || !session) {
-                window.location.href = 'login.html';
-            }
+            if (event === 'SIGNED_OUT' || !session) window.location.href = 'login.html';
         });
 
         function initApp() {
@@ -399,10 +388,9 @@
                 Object.values(contents).forEach(c => c && c.classList.add('hidden'));
                 if (!contents[id]) return;
                 contents[id].classList.remove('hidden');
-                // Use corrected bucket names via BUCKET map
-                if (id === 'timetable')         loadSectionFiles('timetable', BUCKET.planning);
-                else if (id === 'students')     loadSectionFiles('students',  BUCKET.students);
-                else if (id === 'marks')        loadSectionFiles('marks',     BUCKET.notes);
+                if (id === 'timetable')         loadSectionFiles('timetable',    BUCKET.planning);
+                else if (id === 'students')     loadSectionFiles('students',     BUCKET.students);
+                else if (id === 'marks')        loadSectionFiles('marks',        BUCKET.notes);
                 else if (id === 'certificates') loadSectionFiles('certificates', BUCKET.certificates);
             }
             navButtons.forEach(btn => {
@@ -426,7 +414,7 @@
                 }
             });
 
-            // File inputs — use BUCKET map for correct bucket names
+            // File inputs
             document.getElementById('planning-btn').addEventListener('click', () => uploadFile('planning', BUCKET.planning));
             document.getElementById('planning-file').addEventListener('change', () => handleFileSelect('planning'));
             setupDragDrop('planning');
@@ -507,7 +495,7 @@
             const pt  = document.getElementById(`${type}-progress-text`);
             btn.disabled = true; pd.style.display = 'block'; fl.style.width = '40%'; pt.textContent = 'Uploading...';
 
-            const ext = file.name.split('.').pop();
+            const ext      = file.name.split('.').pop();
             const fileName = `${level}_${group}.${ext}`;
 
             const { error } = await sb.storage.from(bucket).upload(fileName, file, {
@@ -523,6 +511,55 @@
                 fl.style.width = '100%'; pt.textContent = 'Completed!';
                 showToast(`${file.name} uploaded successfully ✅`, 'success');
                 setTimeout(() => resetUploadUI(type), 2000);
+            }
+        }
+
+        // ── UPLOAD NOTES → Supabase Storage directement ──
+        async function uploadNotesFile() {
+            const file = document.getElementById('notes-file').files[0];
+            if (!file) return;
+
+            const { data: { session } } = await sb.auth.getSession();
+            if (!session) {
+                showToast('Session expired — please login again', 'error');
+                setTimeout(() => window.location.href = 'login.html', 1500);
+                return;
+            }
+
+            const level    = document.getElementById('notes-level').value;
+            const semestre = document.getElementById('notes-semestre').value;
+            const group    = document.getElementById('notes-group').value;
+
+            const btn = document.getElementById('notes-btn');
+            const pd  = document.getElementById('notes-progress');
+            const fl  = document.getElementById('notes-fill');
+            const pt  = document.getElementById('notes-progress-text');
+
+            btn.disabled = true;
+            pd.style.display = 'block';
+            fl.style.width = '40%';
+            pt.textContent = 'Uploading...';
+
+            const ext      = file.name.split('.').pop();
+            const fileType = currentNotesType === 'pv' ? 'PV' : 'Notes';
+            const fileName = `${fileType}_${level}_${semestre}_${group}.${ext}`;
+
+            const { error } = await sb.storage.from(BUCKET.notes).upload(fileName, file, {
+                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                upsert: true
+            });
+
+            if (error) {
+                fl.style.width = '100%';
+                pt.textContent = 'Error';
+                showToast('Upload error: ' + error.message, 'error');
+                btn.disabled = false;
+            } else {
+                fl.style.width = '100%';
+                pt.textContent = 'Completed!';
+                const label = currentNotesType === 'pv' ? 'PV Délibération' : 'Notes Détaillées';
+                showToast(`${label} — ${fileName} uploadé avec succès ✅`, 'success');
+                setTimeout(() => resetUploadUI('notes'), 2000);
             }
         }
 
@@ -547,15 +584,10 @@
                 try {
                     const base64 = reader.result.split(',')[1];
                     fl.style.width = '55%'; pt.textContent = 'Sending to student...';
-
                     const res = await fetch(N8N_CERT_WEBHOOK, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            student_id: urlStudentId,
-                            pdf_base64: base64,
-                            file_name: file.name
-                        })
+                        body: JSON.stringify({ student_id: urlStudentId, pdf_base64: base64, file_name: file.name })
                     });
                     if (!res.ok) throw new Error(`n8n responded with ${res.status}`);
                     fl.style.width = '100%'; pt.textContent = 'Sent ✅';
@@ -567,11 +599,7 @@
                     btn.disabled = false;
                 }
             };
-            reader.onerror = () => {
-                showToast('Failed to read PDF file', 'error');
-                btn.disabled = false;
-                pd.style.display = 'none';
-            };
+            reader.onerror = () => { showToast('Failed to read PDF file', 'error'); btn.disabled = false; pd.style.display = 'none'; };
             reader.readAsDataURL(file);
         }
 
@@ -595,15 +623,10 @@
                 if (error) throw error;
                 const result = [];
                 for (const f of files || []) {
-                    if (f.name.startsWith('metadata_')) continue;
-                    const { data: md } = await sb.storage.from(bucket).download(`metadata_${f.name}`);
-                    let meta = {};
-                    if (md) { try { meta = JSON.parse(await md.text()); } catch {} }
+                    if (f.name.startsWith('.') || f.name === '.emptyFolderPlaceholder') continue;
                     result.push({
-                        name: meta.original_name || f.name,
-                        level: meta.level || 'Unknown',
-                        group: meta.group || 'Unknown',
-                        uploaded_at: meta.uploaded_at || f.updated_at,
+                        name: f.name,
+                        uploaded_at: f.updated_at,
                         size: f.metadata?.size || 0,
                         storage_name: f.name
                     });
@@ -621,8 +644,10 @@
             const lf = document.getElementById(`${section}-level-filter`)?.value || 'all';
             const gf = document.getElementById(`${section}-group-filter`)?.value || 'all';
             let filtered = [...(sectionFilesCache[section] || [])];
-            if (lf !== 'all') filtered = filtered.filter(f => f.level === lf);
-            if (gf !== 'all') filtered = filtered.filter(f => f.group === gf);
+
+            // Filter by level/group based on filename pattern
+            if (lf !== 'all') filtered = filtered.filter(f => f.name.includes(lf));
+            if (gf !== 'all') filtered = filtered.filter(f => f.name.includes(gf));
             filtered.sort((a,b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
 
             const te = document.getElementById(`${section}-total`);
@@ -650,7 +675,6 @@
         }
 
         async function deleteSectionFile(section, storageName) {
-            // Use BUCKET map for correct names
             const bucketMap = {
                 timetable:    BUCKET.planning,
                 students:     BUCKET.students,
@@ -661,7 +685,6 @@
             if (!b || !confirm('Are you sure you want to delete this file?')) return;
             try {
                 await sb.storage.from(b).remove([storageName]);
-                await sb.storage.from(b).remove([`metadata_${storageName}`]);
                 showToast('File deleted successfully', 'success');
                 await loadSectionFiles(section, b);
             } catch {
@@ -705,48 +728,6 @@
             const map   = { L1: ['S1','S2'], L2: ['S3','S4'], L3: ['S5','S6'] };
             const opts  = map[level] || ['S1','S2'];
             sel.innerHTML = opts.map(s => `<option value="${s}">${s}</option>`).join('');
-        }
-
-        // ── UPLOAD NOTES via n8n webhook ──
-        async function uploadNotesFile() {
-            const file = document.getElementById('notes-file').files[0];
-            if (!file) return;
-            const { data: { session } } = await sb.auth.getSession();
-            if (!session) { showToast('Session expired — please login again', 'error'); setTimeout(() => window.location.href = 'login.html', 1500); return; }
-
-            const level    = document.getElementById('notes-level').value;
-            const semestre = document.getElementById('notes-semestre').value;
-            const group    = document.getElementById('notes-group').value;
-
-            const btn = document.getElementById('notes-btn');
-            const pd  = document.getElementById('notes-progress');
-            const fl  = document.getElementById('notes-fill');
-            const pt  = document.getElementById('notes-progress-text');
-            btn.disabled = true; pd.style.display = 'block'; fl.style.width = '20%'; pt.textContent = 'Reading file...';
-
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-                try {
-                    fl.style.width = '50%'; pt.textContent = 'Sending to database...';
-                    const base64 = e.target.result.split(',')[1];
-                    const res = await fetch(N8N_IMPORT_NOTES_WEBHOOK, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ file_base64: base64, level, semestre, group, type: currentNotesType })
-                    });
-                    if (!res.ok) throw new Error(`Server error: ${res.status}`);
-                    fl.style.width = '100%'; pt.textContent = 'Completed!';
-                    const label = currentNotesType === 'pv' ? 'PV Délibération' : 'Notes Détaillées';
-                    showToast(`${label} (${semestre}) — importé avec succès ✅`, 'success');
-                    setTimeout(() => resetUploadUI('notes'), 2500);
-                } catch (err) {
-                    fl.style.width = '100%'; pt.textContent = 'Error';
-                    showToast('Erreur import: ' + err.message, 'error');
-                    btn.disabled = false;
-                }
-            };
-            reader.onerror = () => { showToast('Erreur lecture fichier', 'error'); btn.disabled = false; pd.style.display = 'none'; };
-            reader.readAsDataURL(file);
         }
 
         window.selectNotesType     = selectNotesType;
